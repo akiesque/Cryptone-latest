@@ -8,3 +8,7 @@ __pycache__/
 # Optional: virtual environments
 venv/
 .env
+.toml
+
+# Unused files
+unused/

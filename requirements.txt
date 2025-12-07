@@ -1,0 +1,10 @@
+streamlit
+pandas
+numpy
+tensorflow
+python-binance
+requests
+streamlit-autorefresh
+plotly
+nltk
+scikit-learn
