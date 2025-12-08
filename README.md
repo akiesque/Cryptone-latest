@@ -5,10 +5,9 @@ Welcome to Cryptone: a Web Application Prototype UI that predicted historical pr
 
 ---
 ### Features:
-- Uses ARIMA-LSTM models for price volatility, CryptoBERT and DistillroBERTa for emotion tagging and categorization
-- Real-time updates the price of the coin and tags CryptoPanic news based on their sentiment scores
+- Uses ARIMA-LSTM models for price volatility, and machine learning integration
 - Interactive Streamlit UI
-- Supports Binance and CryptoPanic integration (API keys are securely handled through a .toml)
+- Supports Binance integration (API keys are securely handled through a .toml)
 
 ---
 ### How to use:
