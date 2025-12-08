@@ -13,7 +13,7 @@ Welcome to Cryptone: a Web Application Prototype UI that predicted historical pr
 ### How to use:
 - Clone this repo:
     ```bash
-   git clone https://github.com/akiesque/Cryptone.git
+   git clone https://github.com/akiesque/Cryptone-latest.git
    cd Cryptone
    
 - Install dependencies (Python 3.10+, etc,..)
