@@ -20,7 +20,7 @@ from tensorflow.keras.models import load_model
 # ---- Paths (update if you trained with a different asset) ----
 DATA_PATH = Path("dataset/price/btc_prices_2020_present.csv")
 LSTM_PATH = Path("models/btc_hybrid_lstm.keras")
-META_PATH = Path("models/btc_hybrid_meta.pkl")  # rename to eth_hybrid_meta.pkl if you change it
+META_PATH = Path("models/btc_hybrid_meta.pkl")  
 
 # How many most-recent days to hold out for evaluation
 HOLDOUT_DAYS = 30

@@ -8,7 +8,7 @@ from tensorflow.keras.models import load_model
 # Paths (adjust if you rename)
 DATA_PATH = Path("dataset/price/btc_prices_2020_present.csv")
 LSTM_PATH = Path("models/btc_hybrid_lstm.keras")
-META_PATH = Path("models/btc_hybrid_meta.pkl")  # still named btc_* in current script
+META_PATH = Path("models/btc_hybrid_meta.pkl")  
 
 # Load meta
 with open(META_PATH, "rb") as f:
