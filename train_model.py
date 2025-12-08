@@ -29,7 +29,7 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
 
-def load_series(path: Path = DATA_PATH, start: str = "2025-06-01", freq: str = "H") -> pd.Series:
+def load_series(path: Path = DATA_PATH, start: str = "2025-01-01", freq: str = "H") -> pd.Series:
     """Load price CSV, normalize to specified frequency (last value per bin), return series indexed by timestamp."""
     df = pd.read_csv(path)
     df["timestamp"] = pd.to_datetime(df["timestamp"])
