@@ -1,6 +1,6 @@
 """
-Unified script to fetch historical prices for BTC, ETH, and XRP
-from January 1, 2022 to present. (DONE)
+Unified script to fetch historical **hourly** prices for BTC, ETH, and XRP
+from January 1, 2024 to present.
 """
 from binance.client import Client
 from datetime import datetime, timedelta
@@ -17,7 +17,7 @@ client = Client(API_KEY, API_SECRET)
 # Function to fetch historical data from a start date to end date
 def fetch_historical_prices(symbol, start_date, end_date=None):
     """
-    Fetch historical daily prices from Binance.
+    Fetch historical hourly prices from Binance.
     
     Args:
         symbol: Trading pair (e.g., 'BTCUSDT')
@@ -25,7 +25,7 @@ def fetch_historical_prices(symbol, start_date, end_date=None):
         end_date: End date as string 'YYYY-MM-DD' or datetime (default: today)
     
     Returns:
-        DataFrame with columns: Date, Price
+        DataFrame with columns: timestamp, price
     """
     # Convert start_date to datetime if string
     if isinstance(start_date, str):
@@ -46,16 +46,17 @@ def fetch_historical_prices(symbol, start_date, end_date=None):
     print(f"{'='*60}")
     
     # Binance allows fetching up to 1000 klines per request
-    # We'll fetch in chunks to avoid rate limits
+    # At 1h interval that covers ~41 days per request
     request_count = 0
     while current_date <= end_date:
         try:
-            # Fetch up to 1000 days at a time
-            formatted_date = current_date.strftime('%d %b, %Y')
+            # Fetch up to 1000 hours at a time
+            formatted_date = current_date.strftime('%d %b, %Y %H:%M:%S')
             klines = client.get_historical_klines(
                 symbol, 
-                Client.KLINE_INTERVAL_1DAY, 
+                Client.KLINE_INTERVAL_1HOUR, 
                 start_str=formatted_date,
+                end_str=end_date.strftime('%d %b, %Y %H:%M:%S'),
                 limit=1000  # Maximum allowed by Binance
             )
             
@@ -66,15 +67,15 @@ def fetch_historical_prices(symbol, start_date, end_date=None):
                     close_price = float(kline[4])
                     
                     # Only add if within our date range
-                    if timestamp.date() <= end_date.date():
+                    if timestamp <= end_date:
                         price_rec.append({
-                            "Date": timestamp.strftime('%m/%d/%Y'),
-                            f"{coin_name}_Price": close_price
+                            "timestamp": timestamp.strftime('%Y-%m-%d %H:%M'),
+                            "price": close_price
                         })
                 
-                # Update current_date to the day after the last fetched date
+                # Update current_date to the hour after the last fetched date
                 last_timestamp = datetime.fromtimestamp(klines[-1][0] / 1000)
-                current_date = last_timestamp + timedelta(days=1)
+                current_date = last_timestamp + timedelta(hours=1)
                 request_count += 1
                 
                 # Progress indicator
@@ -89,16 +90,16 @@ def fetch_historical_prices(symbol, start_date, end_date=None):
             
         except Exception as e:
             print(f"  ⚠️  Error fetching data for {current_date}: {e}")
-            # Skip to next day on error
-            current_date += timedelta(days=1)
+            # Skip to next hour on error
+            current_date += timedelta(hours=1)
             time.sleep(1)  # Wait longer on error
     
     price_df = pd.DataFrame(price_rec)
     
-    # Remove duplicates and sort by date
+    # Remove duplicates and sort by datetime
     if not price_df.empty:
-        price_df = price_df.drop_duplicates(subset=['Date'])
-        price_df = price_df.sort_values('Date')
+        price_df = price_df.drop_duplicates(subset=['timestamp'])
+        price_df = price_df.sort_values('timestamp')
     
     return price_df
 
@@ -106,7 +107,7 @@ def fetch_historical_prices(symbol, start_date, end_date=None):
 if __name__ == "__main__":
     print("\n" + "="*60)
     print("CRYPTONE - Historical Price Data Fetcher")
-    print("Fetching data from January 1, 2022 to present")
+    print("Fetching HOURLY data from January 1, 2024 to present")
     print("="*60)
     
     # Define coins to fetch
@@ -116,7 +117,7 @@ if __name__ == "__main__":
         ('XRPUSDT', 'XRP')
     ]
     
-    start_date = '2020-01-01'
+    start_date = '2024-01-01'
     results = {}
     
     # Create output directory if it doesn't exist
@@ -131,11 +132,11 @@ if __name__ == "__main__":
             
             # Print summary
             if not df.empty:
-                print(f"\n✅ {coin_name}: Fetched {len(df)} days")
-                print(f"   Date range: {df['Date'].iloc[0]} to {df['Date'].iloc[-1]}")
+                print(f"\n✅ {coin_name}: Fetched {len(df)} hours")
+                print(f"   Date range: {df['timestamp'].iloc[0]} to {df['timestamp'].iloc[-1]}")
                 
                 # Save to CSV in dataset/price directory
-                output_file = os.path.join(output_dir, f"{coin_name.lower()}_prices_2022_present.csv")
+                output_file = os.path.join(output_dir, f"{coin_name.lower()}_prices_2024_present_1h.csv")
                 df.to_csv(output_file, index=False)
                 print(f"   💾 Saved to: {output_file}")
             else:
@@ -154,7 +155,7 @@ if __name__ == "__main__":
     print("="*60)
     for coin_name, df in results.items():
         if not df.empty:
-            print(f"  {coin_name}: {len(df)} days of data")
+            print(f"  {coin_name}: {len(df)} hours of data")
     print("="*60)
     print(f"\n✅ All done! Historical price data saved to {output_dir}/")
     print("   Files ready for model training.\n")

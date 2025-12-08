@@ -12,3 +12,4 @@ venv/
 
 # Unused files
 unused/
+/model/

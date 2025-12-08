@@ -5,17 +5,21 @@ import random
 import tensorflow as tf
 import base64
 import time
+import pickle
+from pathlib import Path
 
 from sample_sentiment import get_mock_sentiment
 
 from call_model import load_predmodel, call_data, predict_next_price
-from emotion_model import get_sentiment
 
 from binance.client import Client
 from requests.exceptions import ConnectionError
 from streamlit_autorefresh import st_autorefresh
 import plotly.graph_objects as go
 import plotly.express as px
+from statsmodels.tsa.arima.model import ARIMA
+from tensorflow.keras.models import load_model
+from pandas.tseries.frequencies import to_offset
 
 show = True
 
@@ -114,14 +118,14 @@ st.markdown("""
 
 selected_coin_data = next((coin for coin in coins if coin["symbol"] == selected_coin), coins[0])
 
-## variables
-scaled_features, scaler, df = call_data(f"{coin.get("model")}")
-model = load_predmodel(f"{coin.get("model")}")
+# ## variables
+# scaled_features, scaler, df = call_data(f"{coin.get("model")}")
+# model = load_predmodel(f"{coin.get("model")}")
 
-predicted = predict_next_price(model, scaled_features)
+# predicted = predict_next_price(model, scaled_features)
 
 # Display current price
-current_price = df[f'price_{coin.get("model")}'].values[-1]
+# current_price = df[f'price_{coin.get("model")}'].values[-1]
 
 col1, col2 = st.columns([1,3])
 
@@ -139,7 +143,7 @@ with col1:
 
 with col2:
      # Auto-refresh every 10 seconds
-    st_autorefresh(interval=10000, key="refresh")
+    st_autorefresh(interval=5000, key="refresh")
 
     if show:
 
@@ -240,64 +244,114 @@ st.markdown("""
 col1, col2, col3 = st.columns(3)
 
 ## stuffs
-df = pd.read_csv(f"./dataset/{coin.get("model")}_sentiment_scored.csv")
-sen_score = df['compound'].iloc[5] if not df.empty and 'compound' in df.columns else 0 
-sentiment = df['sentiment'].iloc[-1] if not df.empty and 'sentiment' in df.columns else "Neutral" 
+# df = pd.read_csv(f"./dataset/{coin.get("model")}_sentiment_scored.csv")
+# sen_score = df['compound'].iloc[5] if not df.empty and 'compound' in df.columns else 0 
+# sentiment = df['sentiment'].iloc[-1] if not df.empty and 'sentiment' in df.columns else "Neutral" 
 
-# Load predicted prices
-pred_df = pd.read_csv(f"./dataset/{coin.get("model")}_predicted_prices.csv")
-pred_df["date"] = pd.to_datetime(pred_df["date"])
+# # Load predicted prices
+# pred_df = pd.read_csv(f"./dataset/{coin.get("model")}_predicted_prices.csv")
+# pred_df["date"] = pd.to_datetime(pred_df["date"])
 
-with col1:
-    st.markdown(f"""
-    <div class="card">
-        <div class="metric-label">📉 Sentiment Score</div>
-        <div class="metric-value">{sen_score}</div>
-    </div>
-    """, unsafe_allow_html=True)
+# with col1:
+#     st.markdown(f"""
+#     <div class="card">
+#         <div class="metric-label">📉 Sentiment Score</div>
+#         <div class="metric-value">Placeholder</div>
+#     </div>
+#     """, unsafe_allow_html=True)
 
-with col2:
-    st.markdown(f"""
-    <div class="card">
-        <div class="metric-label">🙎 Emotion</div>
-        <div class="metric-value">{sentiment}</div>
-    </div>
-    """, unsafe_allow_html=True)
+# with col2:
+#     st.markdown(f"""
+#     <div class="card">
+#         <div class="metric-label">🙎 Emotion</div>
+#         <div class="metric-value">Placeholder</div>
+#     </div>
+#     """, unsafe_allow_html=True)
 
-with col3:
-    st.markdown(f"""
-    <div class="card">
-        <div class="metric-label">🔮 Predicted Price</div>
-        <div class="metric-value">{predicted:.4f}</div>
-    </div>
-    """, unsafe_allow_html=True)
+# with col3:
+#     st.markdown(f"""
+#     <div class="card">
+#         <div class="metric-label">🔮 Predicted Price</div>
+#         <div class="metric-value">Placeholder</div>
+#     </div>
+#     """, unsafe_allow_html=True)
 
 # Load and prepare historical data
-df = pd.read_csv(f"./dataset/{coin.get("model")}_price_series.csv")  # Update path
-df["published_date"] = pd.to_datetime(df["published_date"])
-df = df.sort_values("published_date")
-df.set_index("published_date", inplace=True)
+df = pd.read_csv(f"./dataset/price/{coin.get("model")}_prices_2020_present.csv")  # Update path
+df["timestamp"] = pd.to_datetime(df["timestamp"])
+df = df.sort_values("timestamp")
+df.set_index("timestamp", inplace=True)
 
 # Load and prepare predicted data
-pred_df = pd.read_csv(f"./dataset/{coin.get("model")}_predicted_prices.csv")  # Should contain columns: date, predicted_price
+pred_df = pd.read_csv(f"./outputs/{coin.get("model")}_hybrid_forecast.csv")  # Should contain columns: date, predicted_price
 pred_df["date"] = pd.to_datetime(pred_df["date"])
 pred_df = pred_df.sort_values("date")
 pred_df.set_index("date", inplace=True)
 
 # Load and prepare historically predicted data
-hist_pred = pd.read_csv(f"./dataset/{coin.get("model")}_hist_pred.csv") # Should contain columns: date, predicted_price
+hist_pred = pd.read_csv(f"./outputs/{coin.get("model")}_hybrid_in_sample.csv") # Should contain columns: date, predicted_price
 hist_pred['date'] = pd.to_datetime(hist_pred['date'])
 hist_pred = hist_pred.sort_values('date')
 hist_pred.set_index("date", inplace=True)
 
-# load the sentiment scored ones
-histsent = pd.read_csv(f"./dataset/{coin.get("model")}_sentiment_scored.csv")  # Update path
-histsent["published_date"] = pd.to_datetime(histsent["published_date"])
-histsent = histsent.sort_values("published_date")
-histsent.set_index("published_date", inplace=True)
-histsent.drop(histsent[histsent['compound'] == 0].index, inplace = True)
+@st.cache_resource
+def load_hybrid_artifacts(model_key: str):
+    meta_path = Path(f"models/{model_key}_hybrid_meta.pkl")
+    lstm_path = Path(f"models/{model_key}_hybrid_lstm.keras")
+    with open(meta_path, "rb") as f:
+        meta = pickle.load(f)
+    lstm = load_model(lstm_path, compile=False)
+    return meta, lstm
 
-tab1, tab2, tab3, tab4 = st.tabs(["📈 Price Forecast", f"💬 LIVE | {coin.get("name")} Sentiment Score", "📊 Raw Sentiment Counts", "🧾 Historical Forecast"])
+
+def load_series_for_coin(model_key: str, start: str | None, freq: str):
+    path = Path(f"./dataset/price/{model_key}_prices_2020_present.csv")
+    df = pd.read_csv(path)
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    df = df.sort_values("timestamp").dropna()
+    df = df.set_index("timestamp")
+    price_col = "price"
+    if f"price_{model_key}" in df.columns:
+        price_col = f"price_{model_key}"
+    series = df[price_col]
+    if start:
+        series = series.loc[series.index >= pd.Timestamp(start)]
+    series = series.resample(freq).last().ffill()
+    series.index.freq = to_offset(freq)
+    return series
+
+
+def predict_next_with_hybrid(model_key: str, start: str | None = None):
+    meta, lstm = load_hybrid_artifacts(model_key)
+    arima_order = tuple(meta["arima_order"])
+    scaler = meta["residual_scaler"]
+    seq_len = int(meta["seq_len"])
+    freq = meta.get("freq", "H")
+
+    series = load_series_for_coin(model_key, start=start, freq=freq)
+    log_series = np.log(series)
+
+    arima_model = ARIMA(log_series, order=arima_order, trend="n", enforce_stationarity=False, enforce_invertibility=False).fit()
+    arima_pred_log = np.asarray(arima_model.predict(start=log_series.index[0], end=log_series.index[-1], typ="levels"))
+    residuals = log_series.values - arima_pred_log
+    res_scaled = scaler.transform(residuals.reshape(-1, 1)).flatten()
+
+    window = res_scaled[-seq_len:].copy().reshape(1, seq_len, 1)
+    pred_scaled = lstm.predict(window, verbose=0)[0, 0]
+    pred_res = scaler.inverse_transform([[pred_scaled]])[0, 0]
+
+    arima_next_log = arima_model.get_forecast(steps=1).predicted_mean.values[0]
+    forecast_log = arima_next_log + pred_res
+    forecast_price = float(np.exp(forecast_log))
+    anchor = float(series.iloc[-1])
+    if forecast_price > 0:
+        forecast_price = forecast_price * (anchor / forecast_price)
+
+    next_time = series.index[-1] + to_offset(freq)
+    return forecast_price, next_time, series.tail(100)
+
+
+tab1, tab2= st.tabs(["📈Historical Price Forecast", f"💬 LIVE | {coin.get("name")} Predicted Price"])
 
 with tab1:
     # Create the plot
@@ -315,7 +369,7 @@ with tab1:
     # Add predicted prices (make sure dates are after the historical range)
     fig.add_trace(go.Scatter(
         x=pred_df.index,
-        y=pred_df[f"{coin.get("model")}_predicted_price"],
+        y=pred_df[f"{coin.get("model")}_forecast_price"],
         mode="lines",
         name="Predicted Price",
         line=dict(color="orange", dash="dash")
@@ -323,7 +377,7 @@ with tab1:
 
     fig.add_trace(go.Scatter(
         x=hist_pred.index,
-        y=hist_pred["model_predicted_price"],
+        y=hist_pred[f"{coin.get("model")}_hybrid_pred"],
         mode="lines",
         name="Model Prediction (Training)",
         line=dict(color="orange", dash="dot"),
@@ -347,148 +401,37 @@ with tab1:
     st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
+    st.badge("Live short-horizon forecast is not exactly accurate. Use as reference only.", icon=":material/question_mark:", color="orange")
 
-    # Initialize session state for sentiment log and history
-    if "sentiment_log" not in st.session_state:
-        st.session_state.sentiment_log = []
+    current_display = f"{current_price:.6f}" if "current_price" in locals() else "N/A"
+    st.metric("Current price", current_display)
 
-    if "sentiment_df" not in st.session_state:
-        st.session_state.sentiment_df = pd.DataFrame(columns=["timestamp", "score", "coin"])
+    with st.spinner("Loading model and generating forecast..."):
+        try:
+            next_pred_price, next_pred_time, recent_series = predict_next_with_hybrid(coin.get("model"))
+        except Exception as e:
+            next_pred_price, next_pred_time, recent_series = None, None, None
+            st.error(f"Live forecast unavailable: {e}")
 
-    # Fetch new data
-    new_sentiments = get_sentiment(f"{coin.get("model")}")
+    if next_pred_price is not None:
+        horizon_delta = (next_pred_time - recent_series.index.max())
+        horizon_minutes = int(horizon_delta.total_seconds() // 60)
+        horizon_label = f"~{horizon_minutes} minutes" if horizon_minutes < 180 else f"~{horizon_delta}"
+        delta_val = next_pred_price - current_price if "current_price" in locals() else None
+        st.metric(f"Forecast ({horizon_label})", f"{next_pred_price:.6f}", delta=f"{delta_val:+.6f}" if delta_val is not None else None)
 
-    MAX_LOG_SIZE = 20
-
-    existing_timestamps = set(st.session_state.sentiment_df["timestamp"].astype(str))
-
-    for ts, title, score, emoji in new_sentiments:
-        # timestamp = pd.to_datetime(ts).strftime("%H:%M:%S")
-        ts = pd.to_datetime(ts) 
-        ts += pd.to_timedelta(np.random.randint(1, 1000), unit='ms')  # add jitter
-
-        timestamp = ts.strftime("%H:%M:%S:%f")[:-3]  # include milliseconds
-
-          # Keep only last MAX_LOG_SIZE entries
-        if len(st.session_state.sentiment_log) > MAX_LOG_SIZE:
-            st.session_state.sentiment_log.pop(0)
-
-         # Keep only latest 5 in log
-        st.session_state.sentiment_log = st.session_state.sentiment_log[-MAX_LOG_SIZE:]
-
-        # Add all 6 fields: ts, timestamp, title, score, emoji, coin
-        st.session_state.sentiment_log.append((ts, timestamp, title, score, emoji, selected_coin))
-
-        if str(ts) not in existing_timestamps:
-            st.session_state.sentiment_df = pd.concat([
-                st.session_state.sentiment_df,
-                pd.DataFrame([[ts, score, selected_coin]], columns=["timestamp", "score", "coin"])
-            ])
-
-    # Display log
-    # st.markdown(":violet-badge[:material/star: Sample]")
-    st.subheader("🧠 Recent Sentiment Log")
-
-    log_html = "<div style='max-height: 350px; overflow-y: auto; padding-right: 10px;'>"
-
-    for ts, timestamp, title, score, emoji, coin in reversed(st.session_state.sentiment_log):
-        log_html += f"""<div>
-            <div style='margin-bottom: 8px; padding: 6px; border-radius: 8px; background-color: rgba(255,255,255,0.05);'>
-                🕒 <b>{timestamp}</b> | <span style='font-size: 1.2em;'>{emoji}</span>
-                (<span style='color: {"#00FFAA" if score > 0 else "#FF6B6B"};'>{score:.2f}</span>) — {title}
-            </div>
-        """
-
-    log_html += "</div>"
-
-    st.markdown(log_html, unsafe_allow_html=True)
-
-    st.subheader(f"{selected_coin} Sentiment Over Time")
-    # Filter chart data to selected coin only
-    filtered_df = st.session_state.sentiment_df[
-        st.session_state.sentiment_df["coin"] == selected_coin
-    ]
-
-    if not filtered_df.empty:
-        chart_data = filtered_df.set_index("timestamp")[["score"]].reset_index()
-
-    # Show last N entries
-    # chart_data = chart_data[-:]
-
-    # Line trace
-    fig = go.Figure()
-
-    fig.add_trace(go.Scatter(
-        x=chart_data["timestamp"],
-        y=chart_data["score"],
-        mode="lines+markers",
-        line=dict(color="grey", width=0.5, dash="dot"),
-        marker=dict(
-            size=10,
-            color=chart_data["score"],  # Color by sentiment
-            colorscale=["red", "orange", "green"],
-            colorbar=dict(title="Sentiment"),
-            line=dict(width=1, color="white")
-        ),
-        hovertemplate='Time: %{x}<br>Score: %{y:.2f}<extra></extra>',
-        name="Sentiment"
-    ))
-
-    fig.update_layout(
-        xaxis_title="Time",
-        yaxis_title="Sentiment Score",
-        template="plotly_dark",
-        hoverlabel=dict(
-            bgcolor="rgba(0,0,0,0.5)",
-            bordercolor="white",
-            font=dict(color="white"),
-            align="right")
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-    # new_sentiments = get_sentiment(f"{coin.get("symbol")}")
-
-    # for ts, title, score, emoji in new_sentiments:
-    #     st.write(f"🕒 {ts.strftime('%H:%M:%S')} | {emoji} ({score:.2f}) — {title}")
-
-
-
-with tab3:
-     st.write("Coming soon: Raw positive/neutral/negative counts if included in dataset!")
-
-with tab4:
-    st.subheader(f"{selected_coin} Historical Sentiment Forecast")
-    # Line trace
-    fig = go.Figure()
-
-    fig.add_trace(go.Scatter(
-        x=histsent.index,
-        y=histsent["compound"],
-        mode="lines+markers",
-        line=dict(color="grey", width=0.5, dash="dot"),
-        marker=dict(
-            size=10,
-            color=histsent["compound"],  # Color by sentiment
-            colorscale=["red", "orange", "green"],
-            colorbar=dict(title="Sentiment"),
-            line=dict(width=1, color="white")
-        ),
-        hovertemplate='Date: %{x}<br>Score: %{y:.2f}<extra></extra>',
-        name="Sentiment"
-    ))
-
-    fig.update_layout(
-        xaxis_title="Time",
-        yaxis_title="Sentiment Score",
-        template="plotly_dark",
-        hoverlabel=dict(
-            bgcolor="rgba(0,0,0,0.5)",
-            bordercolor="white",
-            font=dict(color="white"),
-            align="right")
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-    
+        recent_df = recent_series.reset_index()
+        next_point = pd.DataFrame({"timestamp": [next_pred_time], "price": [next_pred_price]})
+        chart_df = pd.concat(
+            [
+                recent_df.rename(
+                    columns={recent_df.columns[0]: "timestamp", recent_df.columns[1]: "price"}
+                ),
+                next_point,
+            ],
+            ignore_index=True,
+        )
+        fig_live = px.line(chart_df, x="timestamp", y="price", title="Recent price | next forecast", markers=True)
+        st.plotly_chart(fig_live, use_container_width=True)
+    else:
+        st.info("Forecast data not available for this coin.")
